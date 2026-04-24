@@ -4,7 +4,7 @@ const { Pool } = require('pg');
 const { randomBytes, scryptSync } = require('crypto');
 
 const databaseUrl = process.env.DATABASE_URL;
-const demoPassword = process.env.DEMO_USER_PASSWORD || 'demo-password-change-me';
+const demoPassword =  heslo123;
 
 if (!databaseUrl) {
   console.error('Missing DATABASE_URL in environment.');
