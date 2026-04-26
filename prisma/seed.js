@@ -4,7 +4,7 @@ const { Pool } = require('pg');
 const { randomBytes, scryptSync } = require('crypto');
 
 const databaseUrl = process.env.DATABASE_URL;
-const demoPassword = process.env.DEMO_USER_PASSWORD || 'demo-password-change-me';
+const demoPassword = 'heslo123';
 
 if (!databaseUrl) {
   console.error('Missing DATABASE_URL in environment.');
@@ -39,6 +39,104 @@ const upsertCategory = async (companyId, type, name) => {
   });
 };
 
+const ensureIncome = async (entry) => {
+  const existing = await prisma.income.findFirst({
+    where: {
+      companyId: entry.companyId,
+      date: entry.date,
+      description: entry.description,
+      amount: new Prisma.Decimal(entry.amount),
+    },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.income.create({
+    data: {
+      companyId: entry.companyId,
+      categoryId: entry.categoryId ?? null,
+      createdById: entry.createdById ?? null,
+      date: entry.date,
+      description: entry.description ?? null,
+      amount: new Prisma.Decimal(entry.amount),
+    },
+  });
+};
+
+const ensureExpense = async (entry) => {
+  const existing = await prisma.expense.findFirst({
+    where: {
+      companyId: entry.companyId,
+      date: entry.date,
+      description: entry.description,
+      amount: new Prisma.Decimal(entry.amount),
+    },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.expense.create({
+    data: {
+      companyId: entry.companyId,
+      categoryId: entry.categoryId ?? null,
+      createdById: entry.createdById ?? null,
+      date: entry.date,
+      description: entry.description ?? null,
+      amount: new Prisma.Decimal(entry.amount),
+    },
+  });
+};
+
+const ensureInvoice = async (entry) => {
+  const existing = await prisma.invoice.findFirst({
+    where: {
+      companyId: entry.companyId,
+      title: entry.title,
+      issuedAt: entry.issuedAt,
+      dueDate: entry.dueDate,
+      amount: new Prisma.Decimal(entry.amount),
+    },
+  });
+
+  if (existing) {
+    return prisma.invoice.update({
+      where: { id: existing.id },
+      data: {
+        number: entry.number ?? null,
+        currency: entry.currency ?? 'CZK',
+        description: entry.description ?? null,
+        status: entry.status,
+        paidAt: entry.paidAt ?? null,
+        paidNote: entry.paidNote ?? null,
+        fileUrl: entry.fileUrl ?? null,
+        createdById: entry.createdById ?? null,
+      },
+    });
+  }
+
+  return prisma.invoice.create({
+    data: {
+      companyId: entry.companyId,
+      number: entry.number ?? null,
+      title: entry.title,
+      amount: new Prisma.Decimal(entry.amount),
+      currency: entry.currency ?? 'CZK',
+      issuedAt: entry.issuedAt,
+      dueDate: entry.dueDate,
+      description: entry.description ?? null,
+      status: entry.status,
+      paidAt: entry.paidAt ?? null,
+      paidNote: entry.paidNote ?? null,
+      fileUrl: entry.fileUrl ?? null,
+      createdById: entry.createdById ?? null,
+    },
+  });
+};
+
 const demoUsers = [
   {
     email: 'admin@demo.cz',
@@ -68,7 +166,9 @@ const seed = async () => {
   for (const demoUser of demoUsers) {
     const user = await prisma.user.upsert({
       where: { email: demoUser.email },
-      update: {},
+      update: {
+        passwordHash: hashPassword(demoUser.password),
+      },
       create: {
         email: demoUser.email,
         passwordHash: hashPassword(demoUser.password),
@@ -98,54 +198,157 @@ const seed = async () => {
     throw new Error('Admin demo user was not created.');
   }
 
-  const salaryCategory = await upsertCategory(company.id, 'INCOME', 'Mzda');
-  const salesCategory = await upsertCategory(company.id, 'INCOME', 'Prodej');
-  const rentCategory = await upsertCategory(company.id, 'EXPENSE', 'Najem');
-  const officeCategory = await upsertCategory(company.id, 'EXPENSE', 'Kancelar');
+  const accountantUser = users.find((user) => user.email === 'ucetni@demo.cz');
+  const employeeUser = users.find((user) => user.email === 'zamestnanec@demo.cz');
 
-  const sampleIncomeDate = new Date('2026-01-05T00:00:00.000Z');
-  const sampleExpenseDate = new Date('2026-01-06T00:00:00.000Z');
+  const categories = {
+    mzda: await upsertCategory(company.id, 'INCOME', 'Mzda'),
+    prodej: await upsertCategory(company.id, 'INCOME', 'Prodej'),
+    konzultace: await upsertCategory(company.id, 'INCOME', 'Konzultace'),
+    refundace: await upsertCategory(company.id, 'INCOME', 'Refundace'),
+    najem: await upsertCategory(company.id, 'EXPENSE', 'Najem'),
+    kancelar: await upsertCategory(company.id, 'EXPENSE', 'Kancelar'),
+    marketing: await upsertCategory(company.id, 'EXPENSE', 'Marketing'),
+    doprava: await upsertCategory(company.id, 'EXPENSE', 'Doprava'),
+    software: await upsertCategory(company.id, 'EXPENSE', 'Software'),
+  };
 
-  const existingIncome = await prisma.income.findFirst({
-    where: {
+  const sampleIncomes = [
+    {
       companyId: company.id,
-      date: sampleIncomeDate,
-      description: 'Ukazkovy prijem',
+      categoryId: categories.prodej.id,
+      createdById: adminUser.id,
+      amount: '12500.00',
+      date: new Date('2026-01-05T08:00:00.000Z'),
+      description: 'Prodej kancelarskych balicku',
     },
-  });
+    {
+      companyId: company.id,
+      categoryId: categories.konzultace.id,
+      createdById: accountantUser?.id ?? adminUser.id,
+      amount: '4800.00',
+      date: new Date('2026-01-12T09:30:00.000Z'),
+      description: 'Konzultace k financnimu reportingu',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.mzda.id,
+      createdById: adminUser.id,
+      amount: '32000.00',
+      date: new Date('2026-02-01T07:00:00.000Z'),
+      description: 'Mesicni prijem od hlavniho odberatele',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.refundace.id,
+      createdById: employeeUser?.id ?? adminUser.id,
+      amount: '1500.00',
+      date: new Date('2026-02-15T11:00:00.000Z'),
+      description: 'Refundace sluzebni cesty',
+    },
+  ];
 
-  if (!existingIncome) {
-    await prisma.income.create({
-      data: {
-        amount: new Prisma.Decimal('2500.00'),
-        date: sampleIncomeDate,
-        description: 'Ukazkovy prijem',
-        companyId: company.id,
-        categoryId: salaryCategory.id,
-        createdById: adminUser.id,
-      },
-    });
+  const sampleExpenses = [
+    {
+      companyId: company.id,
+      categoryId: categories.najem.id,
+      createdById: adminUser.id,
+      amount: '18000.00',
+      date: new Date('2026-01-03T08:00:00.000Z'),
+      description: 'Najem kancelare leden',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.kancelar.id,
+      createdById: accountantUser?.id ?? adminUser.id,
+      amount: '2490.00',
+      date: new Date('2026-01-08T10:15:00.000Z'),
+      description: 'Papir, tonery a kancelarske potreby',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.software.id,
+      createdById: adminUser.id,
+      amount: '1290.00',
+      date: new Date('2026-01-20T12:00:00.000Z'),
+      description: 'Mesicni licence ucetniho softwaru',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.marketing.id,
+      createdById: employeeUser?.id ?? adminUser.id,
+      amount: '5600.00',
+      date: new Date('2026-02-10T14:00:00.000Z'),
+      description: 'Online kampan na socialnich sitich',
+    },
+    {
+      companyId: company.id,
+      categoryId: categories.doprava.id,
+      createdById: employeeUser?.id ?? adminUser.id,
+      amount: '890.00',
+      date: new Date('2026-02-18T06:45:00.000Z'),
+      description: 'Cestovne na schuzku s klientem',
+    },
+  ];
+
+  const sampleInvoices = [
+    {
+      companyId: company.id,
+      createdById: adminUser.id,
+      number: '2026-001',
+      title: 'Faktura za vedeni ucetnictvi',
+      amount: '14500.00',
+      currency: 'CZK',
+      issuedAt: new Date('2026-01-10T00:00:00.000Z'),
+      dueDate: new Date('2026-01-24T00:00:00.000Z'),
+      description: 'Pravidelne mesicni ucetni sluzby',
+      status: 'PAID',
+      paidAt: new Date('2026-01-18T09:00:00.000Z'),
+      paidNote: 'Uhrazena bankovnim prevodem',
+      fileUrl: null,
+    },
+    {
+      companyId: company.id,
+      createdById: accountantUser?.id ?? adminUser.id,
+      number: '2026-002',
+      title: 'Dodani kancelarskeho vybaveni',
+      amount: '8200.00',
+      currency: 'CZK',
+      issuedAt: new Date('2026-02-02T00:00:00.000Z'),
+      dueDate: new Date('2026-02-16T00:00:00.000Z'),
+      description: 'Monitory a klavesnice pro nove pracoviste',
+      status: 'OPEN',
+      paidAt: null,
+      paidNote: null,
+      fileUrl: null,
+    },
+    {
+      companyId: company.id,
+      createdById: adminUser.id,
+      number: '2026-003',
+      title: 'Marketingova kampan Q1',
+      amount: '6700.00',
+      currency: 'CZK',
+      issuedAt: new Date('2026-02-20T00:00:00.000Z'),
+      dueDate: new Date('2026-03-05T00:00:00.000Z'),
+      description: 'Propagace sluzeb na internetu',
+      status: 'CANCELLED',
+      paidAt: null,
+      paidNote: 'Stornovano dodavatelem',
+      fileUrl: null,
+    },
+  ];
+
+  for (const entry of sampleIncomes) {
+    await ensureIncome(entry);
   }
 
-  const existingExpense = await prisma.expense.findFirst({
-    where: {
-      companyId: company.id,
-      date: sampleExpenseDate,
-      description: 'Ukazkovy vydaj',
-    },
-  });
+  for (const entry of sampleExpenses) {
+    await ensureExpense(entry);
+  }
 
-  if (!existingExpense) {
-    await prisma.expense.create({
-      data: {
-        amount: new Prisma.Decimal('420.00'),
-        date: sampleExpenseDate,
-        description: 'Ukazkovy vydaj',
-        companyId: company.id,
-        categoryId: officeCategory.id,
-        createdById: adminUser.id,
-      },
-    });
+  for (const entry of sampleInvoices) {
+    await ensureInvoice(entry);
   }
 
   console.log('Seed complete.');
@@ -154,7 +357,10 @@ const seed = async () => {
   for (const demoUser of demoUsers) {
     console.log(`- ${demoUser.email} (${demoUser.role}) / ${demoUser.password}`);
   }
-  console.log(`Categories: ${salaryCategory.name}, ${salesCategory.name}, ${rentCategory.name}, ${officeCategory.name}`);
+  console.log(`Categories created: ${Object.values(categories).length}`);
+  console.log(`Sample incomes created: ${sampleIncomes.length}`);
+  console.log(`Sample expenses created: ${sampleExpenses.length}`);
+  console.log(`Sample invoices created: ${sampleInvoices.length}`);
 };
 
 seed()
